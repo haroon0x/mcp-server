@@ -1116,8 +1116,10 @@ class TestMCPToolSignatures:
         mock_pod = MagicMock()
         mock_pod.metadata.name = "crashed-node-0"
         mock_pod.metadata.labels = {
+            "jobset.sigs.k8s.io/jobset-name": "crashed-job",
             "jobset.sigs.k8s.io/replicatedjob-name": "node",
             "jobset.sigs.k8s.io/job-index": "0",
+            "batch.kubernetes.io/job-completion-index": "0",
         }
 
         mock_v1 = MagicMock()
@@ -1145,7 +1147,11 @@ class TestMCPToolSignatures:
         assert "CUDA out of memory" in resp["data"]["logs"]
         assert resp["data"]["failure_hint"]["category"] == "OOM"
         mock_v1.read_namespaced_pod_log.assert_called_once_with(
-            name="crashed-node-0", namespace="test-ns", previous=True, tail_lines=1000
+            name="crashed-node-0",
+            namespace="test-ns",
+            previous=True,
+            tail_lines=1000,
+            container="node",
         )
 
     def test_get_training_logs_fallback_scopes_to_requested_step(self):
@@ -1160,14 +1166,18 @@ class TestMCPToolSignatures:
         node_0 = MagicMock()
         node_0.metadata.name = "crashed-node-0"
         node_0.metadata.labels = {
+            "jobset.sigs.k8s.io/jobset-name": "crashed-job",
             "jobset.sigs.k8s.io/replicatedjob-name": "node",
             "jobset.sigs.k8s.io/job-index": "0",
+            "batch.kubernetes.io/job-completion-index": "0",
         }
         node_1 = MagicMock()
         node_1.metadata.name = "crashed-node-1"
         node_1.metadata.labels = {
+            "jobset.sigs.k8s.io/jobset-name": "crashed-job",
             "jobset.sigs.k8s.io/replicatedjob-name": "node",
-            "jobset.sigs.k8s.io/job-index": "1",
+            "jobset.sigs.k8s.io/job-index": "0",
+            "batch.kubernetes.io/job-completion-index": "1",
         }
 
         mock_v1 = MagicMock()
@@ -1190,7 +1200,15 @@ class TestMCPToolSignatures:
 
         assert resp["data"]["logs"] == "node-0 crash"
         mock_v1.read_namespaced_pod_log.assert_has_calls(
-            [call(name="crashed-node-0", namespace="test-ns", previous=True, tail_lines=1000)]
+            [
+                call(
+                    name="crashed-node-0",
+                    namespace="test-ns",
+                    previous=True,
+                    tail_lines=1000,
+                    container="node",
+                )
+            ]
         )
         assert mock_v1.read_namespaced_pod_log.call_count == 1
 
@@ -1226,3 +1244,73 @@ class TestMCPToolSignatures:
 
         # Verify normal behavior
         assert "Active log line 1\nActive log line 2" in resp["data"]["logs"]
+
+    def test_get_training_logs_fallback_matches_real_trainjob_pod_labels(self):
+        """The previous-log fallback must select and match pods the same way the SDK does.
+
+        Trainer v2 TrainJob pods carry jobset-name and replicatedjob-name labels (no
+        trainjob-name label), node pods of one TrainJob share the JobSet job-index and
+        differ by the Job completion index, and the SDK reads logs from the container
+        named after the step role.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from kubeflow.trainer.constants import constants as sdk_constants
+
+        from kubeflow_mcp.trainer.api.monitoring import get_training_logs
+
+        expected_selector = sdk_constants.POD_LABEL_SELECTOR.format(trainjob_name="train-oom")
+
+        def make_pod(name: str, completion_index: str) -> MagicMock:
+            pod = MagicMock()
+            pod.metadata.name = name
+            pod.metadata.labels = {
+                "jobset.sigs.k8s.io/jobset-name": "train-oom",
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "jobset.sigs.k8s.io/job-index": "0",
+                "batch.kubernetes.io/job-completion-index": completion_index,
+            }
+            return pod
+
+        mock_client = MagicMock()
+        mock_client.get_job_logs.return_value = []
+
+        selectors: list[str] = []
+        pod_list = MagicMock(
+            items=[make_pod("train-oom-node-0-0", "0"), make_pod("train-oom-node-0-1", "1")]
+        )
+
+        def recording_list(*args, **kwargs):
+            selectors.append(kwargs.get("label_selector", ""))
+            return pod_list
+
+        mock_v1 = MagicMock()
+        mock_v1.list_namespaced_pod = recording_list
+        mock_v1.read_namespaced_pod_log.return_value = "CUDA out of memory"
+
+        with (
+            patch(
+                "kubeflow_mcp.trainer.api.monitoring.get_trainer_client_for_namespace",
+                return_value=mock_client,
+            ),
+            patch("kubeflow_mcp.trainer.api.monitoring.get_core_v1_api", return_value=mock_v1),
+            patch(
+                "kubeflow_mcp.trainer.api.monitoring.get_trainer_effective_namespace",
+                return_value="test-ns",
+            ),
+            patch("kubeflow_mcp.trainer.api.monitoring.check_namespace_allowed", return_value=None),
+        ):
+            resp = get_training_logs(name="train-oom", step="node-1")
+
+        # Pod selection matches the SDK's POD_LABEL_SELECTOR, not a trainjob-name label.
+        assert selectors == [expected_selector]
+        # step="node-1" is the pod with completion index "1" only, and the SDK reads logs
+        # from the container named after the step role, so the trailing index is stripped.
+        mock_v1.read_namespaced_pod_log.assert_called_once_with(
+            name="train-oom-node-0-1",
+            namespace="test-ns",
+            previous=True,
+            tail_lines=1000,
+            container="node",
+        )
+        assert "CUDA out of memory" in resp["data"]["logs"]

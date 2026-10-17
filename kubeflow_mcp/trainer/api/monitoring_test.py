@@ -173,21 +173,54 @@ def _make_pod(labels=None):
 
 
 class TestIsPodForStep:
-    def test_matches_replicated_job_name(self):
-        pod = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node-0"})
-        assert _is_pod_for_step(pod, "node-0") is True
-
-    def test_matches_replicated_job_with_index(self):
+    def test_matches_node_pod_by_completion_index(self):
         pod = _make_pod(
             {
-                "jobset.sigs.k8s.io/replicatedjob-name": "worker",
-                "jobset.sigs.k8s.io/job-index": "2",
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "0",
             }
         )
-        assert _is_pod_for_step(pod, "worker-2") is True
+        assert _is_pod_for_step(pod, "node-0") is True
+
+    def test_matches_indexed_role_pod_by_completion_index(self):
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "launcher",
+                "batch.kubernetes.io/job-completion-index": "2",
+            }
+        )
+        assert _is_pod_for_step(pod, "launcher-2") is True
+
+    def test_indexed_role_does_not_match_other_indexes(self):
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "0",
+            }
+        )
+        assert _is_pod_for_step(pod, "node-1") is False
+
+    def test_matches_initializer_role_without_index(self):
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "dataset-initializer",
+                "batch.kubernetes.io/job-completion-index": "0",
+            }
+        )
+        assert _is_pod_for_step(pod, "dataset-initializer") is True
+        assert _is_pod_for_step(pod, "dataset-initializer-0") is False
+
+    def test_indexed_role_without_index_label(self):
+        pod = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node"})
+        assert _is_pod_for_step(pod, "node-0") is False
 
     def test_no_match(self):
-        pod = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node-1"})
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "1",
+            }
+        )
         assert _is_pod_for_step(pod, "node-0") is False
 
     def test_no_labels(self):
@@ -362,7 +395,13 @@ class TestGetTrainingLogs:
         self, mock_client_fn, _ns, _eff_ns, mock_v1_fn, _validate
     ):
         mock_client_fn.return_value = _make_mock_client(get_job_logs=[])
-        pod = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node-0"})
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/jobset-name": "crash-job",
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "0",
+            }
+        )
         pod.metadata.name = "crash-job-node-0-0"
         mock_v1 = MagicMock()
         mock_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[pod])
@@ -371,11 +410,20 @@ class TestGetTrainingLogs:
         result = get_training_logs("crash-job", step="node-0")
         assert result["success"] is True
         assert "previous crash output" in result["data"]["logs"]
+        mock_v1.list_namespaced_pod.assert_called_once_with(
+            namespace="default",
+            label_selector=(
+                "jobset.sigs.k8s.io/jobset-name=crash-job,"
+                "jobset.sigs.k8s.io/replicatedjob-name in "
+                "(dataset-initializer, model-initializer, launcher, node)"
+            ),
+        )
         mock_v1.read_namespaced_pod_log.assert_called_once_with(
             name="crash-job-node-0-0",
             namespace="default",
             previous=True,
             tail_lines=MAX_LOG_LINES,
+            container="node",
         )
 
     @patch(PATCH_VALIDATE_NAME, return_value=None)
@@ -387,7 +435,12 @@ class TestGetTrainingLogs:
         self, mock_client_fn, _ns, _eff_ns, mock_v1_fn, _validate
     ):
         mock_client_fn.return_value = _make_mock_client(get_job_logs=[])
-        pod = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node-0"})
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "0",
+            }
+        )
         pod.metadata.name = "crash-job-node-0-0"
         mock_v1 = MagicMock()
         mock_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[pod])
@@ -413,9 +466,19 @@ class TestGetTrainingLogs:
         self, mock_client_fn, _ns, _eff_ns, mock_v1_fn, _validate
     ):
         mock_client_fn.return_value = _make_mock_client(get_job_logs=[])
-        non_matching = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "worker"})
-        non_matching.metadata.name = "job-worker-0"
-        matching = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node-0"})
+        non_matching = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "9",
+            }
+        )
+        non_matching.metadata.name = "job-node-0-9"
+        matching = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "0",
+            }
+        )
         matching.metadata.name = "job-node-0-0"
         mock_v1 = MagicMock()
         mock_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[non_matching, matching])
@@ -424,7 +487,13 @@ class TestGetTrainingLogs:
         result = get_training_logs("my-job", step="node-0")
         assert result["success"] is True
         assert "recovered logs" in result["data"]["logs"]
-        mock_v1.read_namespaced_pod_log.assert_called_once()
+        mock_v1.read_namespaced_pod_log.assert_called_once_with(
+            name="job-node-0-0",
+            namespace="default",
+            previous=True,
+            tail_lines=MAX_LOG_LINES,
+            container="node",
+        )
 
     @patch(PATCH_EFF_NS, side_effect=RuntimeError("kubeconfig missing"))
     @patch(PATCH_NS_CHECK, return_value=None)
@@ -593,7 +662,12 @@ class TestGetTrainingLogsCursor:
         self, mock_client_fn, _ns, _eff_ns, mock_v1_fn, _validate
     ):
         mock_client_fn.return_value = _make_mock_client(get_job_logs=[])
-        pod = _make_pod({"jobset.sigs.k8s.io/replicatedjob-name": "node-0"})
+        pod = _make_pod(
+            {
+                "jobset.sigs.k8s.io/replicatedjob-name": "node",
+                "batch.kubernetes.io/job-completion-index": "0",
+            }
+        )
         pod.metadata.name = "crash-job-node-0-0"
         mock_v1 = MagicMock()
         mock_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[pod])

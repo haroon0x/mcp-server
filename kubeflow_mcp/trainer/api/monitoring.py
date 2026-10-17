@@ -15,6 +15,7 @@
 """Monitoring tools for training job logs and events."""
 
 import logging
+import re
 from collections import deque
 from typing import Any
 
@@ -43,19 +44,40 @@ MIN_POLLING_INTERVAL = 1
 _TARGET_STATUS_ALIASES = {"Succeeded": "Complete"}
 _VALID_TARGET_STATUSES = frozenset({"Complete", "Failed", "Running", "Created"})
 
+# Trainer v2 (JobSet-based) pod labeling, mirroring the kubeflow/trainer SDK:
+# kubeflow/trainer/constants/constants.py (POD_LABEL_SELECTOR) and the step naming
+# in KubernetesBackend.__get_trainjob_steps. Real TrainJob pods do not carry a
+# training.kubeflow.org/trainjob-name label, so the previous-container log fallback
+# must list and match pods the same way the SDK does.
+_JOBSET_NAME_LABEL = "jobset.sigs.k8s.io/jobset-name"
+_REPLICATED_JOB_LABEL = "jobset.sigs.k8s.io/replicatedjob-name"
+_JOB_INDEX_LABEL = "batch.kubernetes.io/job-completion-index"
+_TRAINJOB_ROLES = ("dataset-initializer", "model-initializer", "launcher", "node")
+# SDK step names append the Job completion index for the multi-pod roles;
+# initializer roles are always a single pod named after the role itself.
+_INDEXED_ROLES = frozenset({"launcher", "node"})
+
+
+def _trainjob_pod_label_selector(name: str) -> str:
+    """Label selector for the pods the SDK considers part of a TrainJob."""
+    return f"{_JOBSET_NAME_LABEL}={name},{_REPLICATED_JOB_LABEL} in ({', '.join(_TRAINJOB_ROLES)})"
+
+
+def _step_container_name(step: str) -> str:
+    """Container name for a step, mirroring the SDK's get_job_logs naming."""
+    return re.sub(r"-\d+$", "", step)
+
 
 def _is_pod_for_step(pod: Any, step: str) -> bool:
-    """Return whether a JobSet pod corresponds to the requested TrainJob step."""
+    """Return whether a JobSet pod has the requested TrainJob step name (SDK naming)."""
     labels = getattr(pod.metadata, "labels", None) or {}
-    replicated_job = labels.get("jobset.sigs.k8s.io/replicatedjob-name")
-    job_index = labels.get("jobset.sigs.k8s.io/job-index")
-    if replicated_job == step:
-        return True
-    return (
-        replicated_job is not None
-        and job_index is not None
-        and f"{replicated_job}-{job_index}" == step
-    )
+    role = labels.get(_REPLICATED_JOB_LABEL)
+    if role is None:
+        return False
+    index = labels.get(_JOB_INDEX_LABEL)
+    if role in _INDEXED_ROLES and index is not None:
+        return f"{role}-{index}" == step
+    return role == step
 
 
 def _collect_log_lines(
@@ -86,8 +108,9 @@ def _collect_log_lines(
         v1 = get_core_v1_api()
         pods = v1.list_namespaced_pod(
             namespace=eff_ns,
-            label_selector=f"training.kubeflow.org/trainjob-name={name}",
+            label_selector=_trainjob_pod_label_selector(name),
         )
+        container_name = _step_container_name(step)
         for pod in pods.items:
             if not _is_pod_for_step(pod, step):
                 continue
@@ -97,6 +120,7 @@ def _collect_log_lines(
                     namespace=eff_ns,
                     previous=True,
                     tail_lines=MAX_LOG_LINES,
+                    container=container_name,
                 )
                 if raw:
                     log_lines.extend(raw.splitlines())
