@@ -169,6 +169,41 @@ def test_serve_rejects_all_empty_cli_client_entries():
     mock_server.run.assert_not_called()
 
 
+def test_serve_reports_config_value_errors_cleanly():
+    """A ValueError raised by load_config() (env/config file path) surfaces as a
+    clean ClickException instead of an unhandled traceback."""
+    mock_server, mock_create_server, modules_patch = _make_serve_mocks()
+    fake_config_mod = modules_patch["kubeflow_mcp.core.config"]
+    fake_config_mod.load_config = MagicMock(
+        side_effect=ValueError("at least one client must be specified")
+    )
+
+    with patch.dict(sys.modules, modules_patch):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["serve"])
+
+    assert result.exit_code != 0
+    assert "at least one client must be specified" in result.output
+    assert "ValueError" not in result.output
+    mock_create_server.assert_not_called()
+    mock_server.run.assert_not_called()
+
+
+def test_serve_rejects_all_empty_env_client_entries(monkeypatch):
+    """KUBEFLOW_MCP_CLIENTS="," fails cleanly, matching the --clients "," behavior."""
+    monkeypatch.setenv("KUBEFLOW_MCP_CLIENTS", ",")
+    with (
+        patch("kubeflow_mcp.core.config._find_config_file", return_value=None),
+        patch("kubeflow_mcp.core.config._load_yaml_config", return_value={}),
+    ):
+        runner = CliRunner()
+        result = runner.invoke(cli, ["serve"])
+
+    assert result.exit_code != 0
+    assert "Error: at least one client must be specified" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_serve_http_transport_uses_streamable_http():
     mock_server, _, modules_patch = _make_serve_mocks()
 

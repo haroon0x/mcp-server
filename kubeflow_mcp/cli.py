@@ -126,7 +126,13 @@ def serve(
     from kubeflow_mcp.core.server import configure_resilience, create_server
     from kubeflow_mcp.core.telemetry import setup_tracing
 
-    cfg = load_config()
+    try:
+        cfg = load_config()
+    except ValueError as e:
+        # Invalid values from env vars or the config file raise ValueError
+        # (e.g. "at least one client must be specified"); surface them the
+        # same way as invalid --clients CLI input instead of a traceback.
+        raise click.ClickException(str(e)) from None
 
     clients = clients or ",".join(cfg.server.clients)
     persona = persona or cfg.server.persona
