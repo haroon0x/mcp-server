@@ -16,27 +16,37 @@ as a pending GitHub review. Pending reviews are visible only to you: inspect the
 
 ```
 skills/review-pr/
-├── SKILL.md                     # Review workflow
-├── agents/                      # Subagent prompts
+├── SKILL.md                       # Review workflow
+├── agents/                        # Subagent prompts
 │   ├── code-reviewer.md
-│   ├── code-simplifier.md
+│   ├── code-simplifier.md         # Opt-in, outside review (edits code)
 │   ├── comment-analyzer.md
+│   ├── mcp-contract-reviewer.md
 │   ├── pr-test-analyzer.md
 │   ├── silent-failure-hunter.md
 │   └── type-design-analyzer.md
 └── hooks/
-    └── gh-publish-guard.sh      # Confirmation guard for commands that publish to GitHub
+    └── gh-publish-guard.sh        # Confirmation guard for commands that publish to GitHub
 ```
 
 ### Usage
 
 ```
-/review-pr <PR_LINK>           # Run all applicable reviews, e.g. /review-pr https://github.com/kubeflow/mcp-server/pull/1234
+/review-pr <PR_LINK>           # Default review: code reviewer, plus aspect reviewers routed by the changed files, e.g. /review-pr https://github.com/kubeflow/mcp-server/pull/1234
 /review-pr tests errors        # Review only test coverage and error handling
-/review-pr all parallel        # Launch all agents in parallel
+/review-pr mcp                 # Review only the MCP contract checks
+/review-pr all parallel        # Launch the review agents in parallel
+/review-pr simplify            # Separate opt-in step that edits code, never part of a review
 ```
 
-Available aspects: `comments`, `tests`, `errors`, `types`, `code`, `simplify`, `all`.
+The default run reviews a PR's actual state: the linked issue, the full PR diff
+(committed work included, not just local `git diff`), existing review threads,
+and CI checks. `make verify` and `make test-python` run as automated checks and
+their results are part of the summary. Overlapping findings from different
+agents are combined into one comment before posting.
+
+Available aspects: `code`, `mcp`, `comments`, `tests`, `errors`, `types`,
+`simplify` (opt-in, separate step), `all`.
 
 ### Configure for Claude Code
 

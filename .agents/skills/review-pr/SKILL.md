@@ -80,36 +80,63 @@ In these cases, post a small prose comment with a clear action item instead of a
 
 ## Review Workflow:
 
-1. **Determine Review Scope**
-   - Check git status to identify changed files
-   - Parse arguments to see if user requested specific review aspects
-   - Default: Run all applicable reviews
+1. **Gather Context and Determine Review Scope**
+   - Parse arguments to see if the user requested specific review aspects
+   - For a PR, build the review on the PR's actual state, not on local uncommitted
+     work: `gh pr view <num>` (body, linked issues), `gh pr diff <num>` (full diff
+     including committed changes), existing review threads
+     (`gh api repos/{owner}/{repo}/pulls/<num>/comments`), and CI results
+     (`gh pr checks <num>`). A local `git diff` misses changes already committed
+     to the PR branch.
+   - Only fall back to `git status` / `git diff` when reviewing local uncommitted
+     work before pushing
+   - `gh pr checks` failures are findings in their own right: report what failed,
+     why it matters for this diff, and the fix
 
 2. **Available Review Aspects:**
+   - **code** - General code review for project guidelines (always runs)
+   - **mcp** - MCP-specific contract checks: tool schema stability, confirm gate,
+     persona permissions, auth and namespace validation, error responses, SDK
+     contracts, protocol conformance
    - **comments** - Analyze code comment accuracy and maintainability
    - **tests** - Review test coverage quality and completeness
    - **errors** - Check error handling for silent failures
-   - **types** - Analyze type design and invariants (if new types added)
-   - **code** - General code review for project guidelines
-   - **simplify** - Simplify code for clarity and maintainability
-   - **all** - Run all applicable reviews (default)
+   - **types** - Analyze type design and invariants
+   - **simplify** - Separate opt-in step that edits code, never part of a review
+     run (see [Opt-in Simplify Pass](#opt-in-simplify-pass))
+   - **all** - Run every except simplify
 
 3. **Identify Changed Files**
-   - Run `git diff --name-only` to see modified files
-   - Check if PR already exists: `gh pr view`
+   - Get the changed file list from `gh pr diff --name-only <num>` for a PR, or
+     `git diff --name-only` for local work
    - Identify file types and what reviews apply
+   - Check if a PR already exists: `gh pr view`
 
-4. **Determine Applicable Reviews**
+4. **Route Reviews by Changed Files**
 
-   Based on changes:
-   - **Always applicable**: code-reviewer (general quality)
-   - **If test files changed**: pr-test-analyzer
-   - **If comments/docs added**: comment-analyzer
-   - **If error handling changed**: silent-failure-hunter
-   - **If types added/modified**: type-design-analyzer
-   - **After passing review**: code-simplifier (polish and refine)
+   The general reviewer is the default and always runs. Everything else runs
+   only when the diff calls for it. Route on the file map:
 
-5. **Launch Review Agents**
+   | Changed files | Reviewer to run |
+   |---|---|
+   | anything under `kubeflow_mcp/` | code-reviewer (default) |
+   | tool modules, `core/policy.py`, `core/security.py`, `core/auth.py`, `core/server.py`, `common/types.py` | code-reviewer + mcp-contract-reviewer |
+   | `*_test.py` or no tests touched by production changes | pr-test-analyzer |
+   | docstrings, comments, docs, `resources/` markdown | comment-analyzer |
+   | try/except, `ToolError`, fallback logic | silent-failure-hunter |
+   | new or modified type classes (`common/types.py`, `*/types/`) | type-design-analyzer |
+
+   No aspect-specific reviewer runs for a diff that does not touch its files.
+   That keeps findings unique and review time proportional to the change.
+
+5. **Run Automated Checks**
+
+   Before or alongside the agents, run the repo's own lint and quality gates so
+   mechanical findings carry over into the summary instead of being re-discovered
+   by the agents: `make verify` and `make test-python`. Record both results and
+   include them in the aggregate summary as an "Automated checks" section.
+
+6. **Launch Review Agents**
 
    Each agent's instructions live in [agents/](agents/) next to this file (e.g. `agents/code-reviewer.md`).
    If an agent with that name is registered in your environment, use it. Otherwise, launch a
@@ -126,20 +153,28 @@ In these cases, post a small prose comment with a clear action item instead of a
    - Faster for comprehensive review
    - Results come back together
 
-6. **Aggregate Results**
+7. **Aggregate and Deduplicate Results**
 
-   After agents complete, summarize:
+   After agents complete, combine overlapping feedback before posting: when two
+   agents report the same issue on the same lines, keep one comment and cite
+   both agents in it. Never post two comments for the same finding. Summarize:
+   - **Automated checks** (make verify, make test-python results)
    - **Critical Issues** (must fix before merge)
    - **Important Issues** (should fix)
    - **Suggestions** (nice to have)
    - **Positive Observations** (what's good)
 
-7. **Provide Action Plan**
+8. **Provide Action Plan**
 
    Organize findings:
 
    ```markdown
    # PR Review Summary
+
+   ## Automated checks
+
+   - make verify: <pass/fail>
+   - make test-python: <pass/fail>
 
    ## Critical Issues (X found)
 
@@ -165,17 +200,40 @@ In these cases, post a small prose comment with a clear action item instead of a
    4. Re-run review after fixes
    ```
 
-8. **Post a Pending Review**
+9. **Post a Pending Review**
 
    For a PR, create a pending GitHub review with the inline comments as described in
    [Posting the Review](#posting-the-review), then share its link so the user can submit it.
 
+## Opt-in Simplify Pass
+
+The simplify aspect is not part of a review run. Unlike the reviewers, it edits
+code, so it must never contribute comments to a pending review and never runs
+alongside one by default. To use it, run it deliberately after review findings
+are resolved:
+
+```
+/review-pr simplify
+```
+
+Then:
+
+1. Show every proposed edit as a diff to the user for approval and never change behavior
+2. Re-run the review workflow on the simplified code before submitting
+3. Run `make verify` and `make test-python` again before pushing
+
 ## Usage Examples:
 
-**Full review (default):**
+**Default review (code reviewer, plus aspect reviewers when the diff calls for them):**
 
 ```
 /review-pr
+```
+
+**Review a specific PR:**
+
+```
+/review-pr https://github.com/kubeflow/mcp-server/pull/1234
 ```
 
 **Specific aspects:**
@@ -184,21 +242,38 @@ In these cases, post a small prose comment with a clear action item instead of a
 /review-pr tests errors
 # Reviews only test coverage and error handling
 
+/review-pr mcp
+# Reviews only the MCP contract checks
+
 /review-pr comments
 # Reviews only code comments
 
 /review-pr simplify
-# Simplifies code after passing review
+# Separate opt-in step: edits code, never part of a review
 ```
 
 **Parallel review:**
 
 ```
 /review-pr all parallel
-# Launches all agents in parallel
+# Launches the review agents in parallel (never includes simplify)
 ```
 
 ## Agent Descriptions:
+
+**code-reviewer**:
+
+- Checks AGENTS.md compliance
+- Detects bugs and issues
+- Reviews general code quality
+- Always runs; the default reviewer
+
+**mcp-contract-reviewer**:
+
+- Verifies tool schema stability and the confirm gate
+- Checks persona allowlists and namespace/name validation
+- Reviews auth fail-closed behavior and ToolError responses
+- Guards SDK contract tests and protocol conformance
 
 **comment-analyzer**:
 
@@ -224,13 +299,7 @@ In these cases, post a small prose comment with a clear action item instead of a
 - Reviews invariant expression
 - Rates type design quality
 
-**code-reviewer**:
-
-- Checks AGENTS.md compliance
-- Detects bugs and issues
-- Reviews general code quality
-
-**code-simplifier**:
+**code-simplifier** (opt-in, outside review):
 
 - Simplifies complex code
 - Improves clarity and readability
@@ -240,7 +309,7 @@ In these cases, post a small prose comment with a clear action item instead of a
 ## Tips:
 
 - **Run early**: Before creating PR, not after
-- **Focus on changes**: Agents analyze git diff by default
+- **Focus on changes**: For a PR the agents analyze the full PR diff, not local uncommitted work
 - **Address critical first**: Fix high-priority issues before lower priority
 - **Re-run after fixes**: Verify issues are resolved
 - **Use specific reviews**: Target specific aspects when you know the concern
@@ -251,19 +320,21 @@ In these cases, post a small prose comment with a clear action item instead of a
 
 ```
 1. Write code
-2. Run: /review-pr code errors
-3. Fix any critical issues
-4. Commit
+2. Run: make verify
+3. Run: /review-pr code errors
+4. Fix any critical issues
+5. Commit
 ```
 
 **Before creating PR:**
 
 ```
 1. Stage all changes
-2. Run: /review-pr all
-3. Address all critical and important issues
-4. Run specific reviews again to verify
-5. Create PR
+2. Run: make verify && make test-python
+3. Run: /review-pr all
+4. Address all critical and important issues
+5. Run specific reviews again to verify
+6. Create PR
 ```
 
 **After PR feedback:**
@@ -282,3 +353,4 @@ In these cases, post a small prose comment with a clear action item instead of a
 - Results are actionable with specific file:line references
 - Agents use appropriate models for their complexity
 - Agent prompts are bundled in `agents/` next to this skill
+- code-simplifier is opt-in and lives outside review runs because it edits code
