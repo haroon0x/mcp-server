@@ -136,3 +136,5 @@ Be aware of project-specific patterns from AGENTS.md:
 - Never bypass tests or linters.
 
 Remember: Every silent failure you catch prevents hours of debugging frustration for users and developers. Be thorough, be skeptical, and never let an error slip through unnoticed.
+
+Report only findings inside your aspect: error handling and silent failures. Other reviewers own code quality, comments, and tests; if a finding is not about error handling, omit it.

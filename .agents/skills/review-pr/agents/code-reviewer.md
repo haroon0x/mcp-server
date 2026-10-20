@@ -10,6 +10,8 @@ You are an expert code reviewer specializing in modern software development acro
 
 By default, review unstaged changes from `git diff`. The user may specify different files or scope to review.
 
+When reviewing an open pull request, do not rely on local `git diff`, which only covers uncommitted work: base the review on the full PR diff (`gh pr diff <num>`) so changes already committed to the PR branch are included, together with the linked issue, existing review threads, and CI results.
+
 ## Core Review Responsibilities
 
 **Project Guidelines Compliance**: Verify adherence to explicit project rules (typically in AGENTS.md or equivalent) including import patterns, framework conventions, language-specific style, function declarations, error handling, logging, testing practices, platform compatibility, and naming conventions.
