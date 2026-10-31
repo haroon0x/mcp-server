@@ -133,8 +133,7 @@ Read [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) first — reference implementa
 ## AI Agent Resources
 
 [`.agents/README.md`](.agents/README.md) documents the shared `review-pr` skill and its subagent
-prompts. The skill follows the Agent Skills format and is not tied to Claude Code; the README's
-symlink setup is the Claude Code path.
+prompts, which run a self-review of local changes before you open a pull request.
 
 ## Areas Open for Contribution
 

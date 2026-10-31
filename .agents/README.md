@@ -10,12 +10,11 @@ Shared resources for AI coding agents working on Kubeflow MCP Server.
 
 ## review-pr
 
-Runs a comprehensive pull request review using specialized subagents and posts the inline comments
-as a pending GitHub review. Pending reviews are visible only to you: inspect the draft in the PR's
-**Files changed** tab, edit or remove comments, and submit it yourself.
-
-The skill follows the Agent Skills format and is not tied to Claude Code; the setup below is the
-Claude Code path. Other harnesses can load `SKILL.md` and `agents/*.md` directly.
+Runs a comprehensive review with specialized subagents. It is meant for self-review of local
+changes before you commit and open a pull request: findings come back in the terminal as
+`file:line` plus a `diff` block you apply in your editor. Pointing it at a pull request reviews
+the PR's diff instead and posts the inline comments as a pending GitHub review, which is visible
+only to you until you submit it in the **Files changed** tab.
 
 ```
 skills/review-pr/
@@ -33,16 +32,17 @@ skills/review-pr/
 ### Usage
 
 ```
-/review-pr <PR_LINK>           # Default review: code reviewer, plus aspect reviewers routed by the changed files, e.g. /review-pr https://github.com/kubeflow/mcp-server/pull/1234
+/review-pr                      # Self-review local changes: file:line plus a diff block per finding
+/review-pr <PR_LINK>           # Review an existing PR, e.g. /review-pr https://github.com/kubeflow/mcp-server/pull/1234
 /review-pr tests errors        # Review only test coverage and error handling
 /review-pr mcp                 # Review only the MCP contract checks
 /review-pr all parallel        # Launch the review agents in parallel
 /review-pr simplify            # Separate opt-in step that edits code, never part of a review
 ```
 
-The default run reviews a PR's actual state: the linked issue, the full PR diff
-(committed work included, not just local `git diff`), existing review threads,
-and CI checks. Overlapping findings from different agents are combined into one
+The local run needs no GitHub access and covers unpushed work. The PR run reviews the PR's
+actual state: the linked issue, the full PR diff (committed work included), existing review
+threads, and CI checks. Overlapping findings from different agents are combined into one
 comment before posting.
 
 Available aspects: `code`, `mcp`, `comments`, `tests`, `errors`, `types`,

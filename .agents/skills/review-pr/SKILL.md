@@ -1,24 +1,28 @@
 ---
 name: review-pr
-description: Comprehensive PR review using specialized agents. Use when asked to review a pull request or local changes before committing or creating a PR.
+description: Self-review of local changes before committing or opening a pull request, and review of an existing pull request, using specialized agents.
 allowed-tools: ["Bash", "Glob", "Grep", "Read", "Task"]
 ---
 
 # Comprehensive PR Review
 
-Run a comprehensive pull request review using multiple specialized agents, each focusing on a different aspect of code quality.
+Run a comprehensive review using multiple specialized agents, each focusing on a different aspect of code quality.
 
-In the review body message keep it minimal: thank the contributor for their work and note that the review was done using AI tools. Do not include summaries or aggregated findings in the review body, only post inline comments on specific lines.
+The primary use is self-review: run it on your own branch before you commit or open a PR, so findings get fixed in the editor rather than in a GitHub thread. Reviewing an existing pull request is the same workflow applied to the PR's diff, and is the secondary mode.
 
-Keep inline comments concise, respectful, and actionable. Assume good intent and explain why a change matters without scolding or exaggerating severity. Use an encouraging tone, especially for new contributors, so they feel welcome to contribute again.
+## Output
 
-**Prefer GitHub suggestions over prose comments.** Whenever a finding can be expressed as a concrete code change, post it as a committable GitHub `suggestion` block so the author can apply it in one click. Do NOT describe the change in words. See [Comment Format: Prefer Suggestions](#comment-format-prefer-suggestions) for the mechanics. Only fall back to a plain prose comment when a suggestion is not feasible (see that section for when).
+For local changes, the default scope, report every finding directly in the terminal: the `file:line`, why it matters, and a fenced `diff` block with the change to make, so the user applies it in their editor. Nothing is posted anywhere in this mode, so write comments as notes to the author of the work, not as replies to a reviewer.
 
-Before posting on GitHub ALWAYS print all proposed comments and the organized summary in the terminal for human review. The summary is for local reference only and must NOT be posted to GitHub.
-
-Post the review as a **pending** GitHub review. Never submit it yourself: the user inspects the draft and submits it in GitHub. See [Posting the Review](#posting-the-review).
+For a pull request, the findings become inline review comments on a pending GitHub review, so they must read as feedback to a contributor. Keep each one concise, respectful, and actionable: assume good intent and explain why a change matters without scolding or exaggerating severity. Use an encouraging tone, especially for new contributors.
 
 ## Posting the Review
+
+Use this section only when the scope is a pull request. Posting is the last step, after the findings have been aggregated and deduplicated.
+
+Before posting ALWAYS print all proposed comments and the organized summary in the terminal for human review. The summary is for local reference only and must NOT be posted to GitHub.
+
+In the review body message keep it minimal: thank the contributor for their work and note that the review was done using AI tools. Do not include summaries or aggregated findings in the review body, only post inline comments on specific lines.
 
 Create the review with the [create-a-review API](https://docs.github.com/en/rest/pulls/reviews#create-a-review-for-a-pull-request) and **omit the `event` field**. Without `event`, GitHub creates the review in the `PENDING` state, which is visible only to the user until they submit it.
 
@@ -46,10 +50,11 @@ Where `review.json` contains:
 - Do NOT set `event` (`APPROVE`, `REQUEST_CHANGES`, or `COMMENT`) and do NOT call the submit-review endpoint.
 - GitHub allows only one pending review per user per PR. If the request fails because a pending review already exists, stop and ask the user whether to delete it or add to it.
 - After the review is created, print its `html_url` and tell the user to open the PR's **Files changed** tab, adjust or remove comments as needed, and submit the review there.
+- For every actionable inline comment, prefer a `suggestion` block whenever the fix is a concrete code change; see [Comment Format: Prefer Suggestions](#comment-format-prefer-suggestions).
 
-## Comment Format: Prefer Suggestions
+### Comment Format: Prefer Suggestions
 
-The default and preferred format for every actionable inline comment is a GitHub suggested change. A suggestion renders a "Commit suggestion" button, so the author applies the fix without hand-editing.
+Applies to inline comments on a pull request. A suggested change renders a "Commit suggestion" button, so the author applies the fix without hand-editing.
 
 **Rules for writing a suggestion:**
 
@@ -82,14 +87,15 @@ In these cases, post a small prose comment with a clear action item instead of a
 
 1. **Gather Context and Determine Review Scope**
    - Parse arguments to see if the user requested specific review aspects
-   - For a PR, build the review on the PR's actual state, not on local uncommitted
-     work: `gh pr view <num>` (body, linked issues), `gh pr diff <num>` (full diff
-     including committed changes), existing review threads
+   - Choose the scope first. The default is local work, the pre-PR path: `git status`,
+     `git diff` (staged and unstaged), and `git log` against the base branch for commits
+     not yet pushed. This needs no GitHub access and reports findings in the terminal.
+   - When the target is a pull request, build the review on the PR's actual state, not on
+     local uncommitted work: `gh pr view <num>` (body, linked issues), `gh pr diff <num>`
+     (full diff including committed changes), existing review threads
      (`gh api repos/{owner}/{repo}/pulls/<num>/comments`), and CI results
      (`gh pr checks <num>`). A local `git diff` misses changes already committed
      to the PR branch.
-   - Only fall back to `git status` / `git diff` when reviewing local uncommitted
-     work before pushing
    - `gh pr checks` failures are findings in their own right: report what failed,
      why it matters for this diff, and the fix
 
@@ -187,7 +193,10 @@ In these cases, post a small prose comment with a clear action item instead of a
    4. Re-run review after fixes
    ```
 
-8. **Post a Pending Review**
+8. **Report or Post the Findings**
+
+   For local changes, print the summary and the per-finding `diff` blocks in the terminal and
+   stop there.
 
    For a PR, create a pending GitHub review with the inline comments as described in
    [Posting the Review](#posting-the-review), then share its link so the user can submit it.
@@ -210,11 +219,13 @@ Then:
 
 ## Usage Examples:
 
-**Default review (code reviewer, plus aspect reviewers when the diff calls for them):**
+**Self-review local changes before committing:**
 
 ```
 /review-pr
 ```
+
+Findings are printed in the terminal with `file:line` and a `diff` block to apply.
 
 **Review a specific PR:**
 
@@ -294,8 +305,8 @@ Then:
 
 ## Tips:
 
-- **Run early**: Before creating PR, not after
-- **Focus on changes**: For a PR the agents analyze the full PR diff, not local uncommitted work
+- **Run early**: before you commit and open a PR; reviewing after the fact is the fallback
+- **Focus on changes**: local runs cover unpushed work, a PR run covers the full PR diff
 - **Address critical first**: Fix high-priority issues before lower priority
 - **Re-run after fixes**: Verify issues are resolved
 - **Use specific reviews**: Target specific aspects when you know the concern
