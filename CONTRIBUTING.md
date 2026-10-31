@@ -130,6 +130,12 @@ We use [Conventional Commits](https://www.conventionalcommits.org/):
 Read [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md) first — reference implementation:
 [`kubeflow_mcp/trainer/`](kubeflow_mcp/trainer/).
 
+## AI Agent Resources
+
+[`.agents/README.md`](.agents/README.md) documents the shared `review-pr` skill and its subagent
+prompts. The skill follows the Agent Skills format and is not tied to Claude Code; the README's
+symlink setup is the Claude Code path.
+
 ## Areas Open for Contribution
 
 - **OptimizerClient tools** - Hyperparameter optimization integration

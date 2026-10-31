@@ -6,6 +6,9 @@ __debug_bin
 *.swo
 *~
 
+# Local agent tooling (symlinks created by .agents/README.md)
+.claude/
+
 # Python cache files
 __pycache__/
 *.egg-info/

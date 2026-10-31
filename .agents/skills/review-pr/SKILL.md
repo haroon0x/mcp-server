@@ -129,14 +129,7 @@ In these cases, post a small prose comment with a clear action item instead of a
    No aspect-specific reviewer runs for a diff that does not touch its files.
    That keeps findings unique and review time proportional to the change.
 
-5. **Run Automated Checks**
-
-   Before or alongside the agents, run the repo's own lint and quality gates so
-   mechanical findings carry over into the summary instead of being re-discovered
-   by the agents: `make verify` and `make test-python`. Record both results and
-   include them in the aggregate summary as an "Automated checks" section.
-
-6. **Launch Review Agents**
+5. **Launch Review Agents**
 
    Each agent's instructions live in [agents/](agents/) next to this file (e.g. `agents/code-reviewer.md`).
    If an agent with that name is registered in your environment, use it. Otherwise, launch a
@@ -153,28 +146,22 @@ In these cases, post a small prose comment with a clear action item instead of a
    - Faster for comprehensive review
    - Results come back together
 
-7. **Aggregate and Deduplicate Results**
+6. **Aggregate and Deduplicate Results**
 
    After agents complete, combine overlapping feedback before posting: when two
    agents report the same issue on the same lines, keep one comment and cite
    both agents in it. Never post two comments for the same finding. Summarize:
-   - **Automated checks** (make verify, make test-python results)
    - **Critical Issues** (must fix before merge)
    - **Important Issues** (should fix)
    - **Suggestions** (nice to have)
    - **Positive Observations** (what's good)
 
-8. **Provide Action Plan**
+7. **Provide Action Plan**
 
    Organize findings:
 
    ```markdown
    # PR Review Summary
-
-   ## Automated checks
-
-   - make verify: <pass/fail>
-   - make test-python: <pass/fail>
 
    ## Critical Issues (X found)
 
@@ -200,7 +187,7 @@ In these cases, post a small prose comment with a clear action item instead of a
    4. Re-run review after fixes
    ```
 
-9. **Post a Pending Review**
+8. **Post a Pending Review**
 
    For a PR, create a pending GitHub review with the inline comments as described in
    [Posting the Review](#posting-the-review), then share its link so the user can submit it.
@@ -220,7 +207,6 @@ Then:
 
 1. Show every proposed edit as a diff to the user for approval and never change behavior
 2. Re-run the review workflow on the simplified code before submitting
-3. Run `make verify` and `make test-python` again before pushing
 
 ## Usage Examples:
 
@@ -320,21 +306,19 @@ Then:
 
 ```
 1. Write code
-2. Run: make verify
-3. Run: /review-pr code errors
-4. Fix any critical issues
-5. Commit
+2. Run: /review-pr code errors
+3. Fix any critical issues
+4. Commit
 ```
 
 **Before creating PR:**
 
 ```
 1. Stage all changes
-2. Run: make verify && make test-python
-3. Run: /review-pr all
-4. Address all critical and important issues
-5. Run specific reviews again to verify
-6. Create PR
+2. Run: /review-pr all
+3. Address all critical and important issues
+4. Run specific reviews again to verify
+5. Create PR
 ```
 
 **After PR feedback:**

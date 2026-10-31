@@ -14,19 +14,20 @@ Runs a comprehensive pull request review using specialized subagents and posts t
 as a pending GitHub review. Pending reviews are visible only to you: inspect the draft in the PR's
 **Files changed** tab, edit or remove comments, and submit it yourself.
 
+The skill follows the Agent Skills format and is not tied to Claude Code; the setup below is the
+Claude Code path. Other harnesses can load `SKILL.md` and `agents/*.md` directly.
+
 ```
 skills/review-pr/
 ├── SKILL.md                       # Review workflow
-├── agents/                        # Subagent prompts
-│   ├── code-reviewer.md
-│   ├── code-simplifier.md         # Opt-in, outside review (edits code)
-│   ├── comment-analyzer.md
-│   ├── mcp-contract-reviewer.md
-│   ├── pr-test-analyzer.md
-│   ├── silent-failure-hunter.md
-│   └── type-design-analyzer.md
-└── hooks/
-    └── gh-publish-guard.sh        # Confirmation guard for commands that publish to GitHub
+└── agents/                        # Subagent prompts
+    ├── code-reviewer.md
+    ├── code-simplifier.md         # Opt-in, outside review (edits code)
+    ├── comment-analyzer.md
+    ├── mcp-contract-reviewer.md
+    ├── pr-test-analyzer.md
+    ├── silent-failure-hunter.md
+    └── type-design-analyzer.md
 ```
 
 ### Usage
@@ -41,9 +42,8 @@ skills/review-pr/
 
 The default run reviews a PR's actual state: the linked issue, the full PR diff
 (committed work included, not just local `git diff`), existing review threads,
-and CI checks. `make verify` and `make test-python` run as automated checks and
-their results are part of the summary. Overlapping findings from different
-agents are combined into one comment before posting.
+and CI checks. Overlapping findings from different agents are combined into one
+comment before posting.
 
 Available aspects: `code`, `mcp`, `comments`, `tests`, `errors`, `types`,
 `simplify` (opt-in, separate step), `all`.
@@ -63,22 +63,3 @@ done
 
 If the subagents are not registered, the skill falls back to launching a general-purpose subagent
 with the prompt from `agents/<name>.md`.
-
-#### GitHub publish guard hook
-
-The skill asks the agent to show draft comments before posting them, but an agent can skip an
-instruction. `hooks/gh-publish-guard.sh` is a Claude Code `PreToolUse` hook that the harness
-enforces: it forces a confirmation prompt before any Bash command that writes to GitHub.
-
-The Agent Skills spec has no field for hooks, and Claude Code does not auto-load hook files from
-`.claude/hooks/`, so register the hook in `.claude/settings.json`. Run from the repository root:
-
-```bash
-[ -f .claude/settings.json ] || echo '{}' > .claude/settings.json
-jq --arg cmd '"$CLAUDE_PROJECT_DIR"/.agents/skills/review-pr/hooks/gh-publish-guard.sh' '
-  if any(.hooks.PreToolUse[]?.hooks[]?; .command == $cmd) then .
-  else .hooks.PreToolUse += [{matcher: "Bash", hooks: [{type: "command", command: $cmd}]}]
-  end' .claude/settings.json > .claude/settings.json.tmp && mv .claude/settings.json.tmp .claude/settings.json
-```
-
-Run `/hooks` in Claude Code to verify that it is registered.
